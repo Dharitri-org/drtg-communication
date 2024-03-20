@@ -1,7 +1,10 @@
 package main
 
 import (
-	"sync"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/Dharitri-org/drtg-communication/testscommon"
 	"github.com/Dharitri-org/drtg-communication/websocket/data"
@@ -25,6 +28,7 @@ func main() {
 			WithAcknowledge:            true,
 			BlockingAckOnError:         false,
 			DropMessagesIfNoConnection: false,
+			AcknowledgeTimeoutInSec:    10,
 		},
 		Marshaller: marshaller,
 		Log:        log,
@@ -40,15 +44,18 @@ func main() {
 		_ = wsClient.Close()
 	}()
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	_ = wsClient.SetPayloadHandler(&testscommon.PayloadHandlerStub{
-		ProcessPayloadCalled: func(payload []byte, topic string) error {
-			log.Info("received", "topic", topic, "payload", string(payload))
-			wg.Done()
+	err = wsClient.SetPayloadHandler(&testscommon.PayloadHandlerStub{
+		ProcessPayloadCalled: func(payload []byte, topic string, version uint32) error {
+			log.Info("received", "topic", topic, "payload", string(payload), "version", fmt.Sprint(version))
 			return nil
 		},
 	})
+	log.LogIfError(err)
 
-	wg.Wait()
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, syscall.SIGINT, syscall.SIGTERM)
+
+	<-interrupt
+	err = wsClient.Close()
+	log.LogIfError(err)
 }

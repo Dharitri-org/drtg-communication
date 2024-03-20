@@ -18,12 +18,14 @@ import (
 // ArgsWebSocketClient holds the arguments needed for creating a client
 type ArgsWebSocketClient struct {
 	RetryDurationInSeconds     int
+	AckTimeoutInSeconds        int
 	WithAcknowledge            bool
 	BlockingAckOnError         bool
 	DropMessagesIfNoConnection bool
 	URL                        string
 	PayloadConverter           websocket.PayloadConverter
 	Log                        core.Logger
+	PayloadVersion             uint32
 }
 
 type client struct {
@@ -47,8 +49,10 @@ func NewWebSocketClient(args ArgsWebSocketClient) (*client, error) {
 		PayloadConverter:   args.PayloadConverter,
 		Log:                args.Log,
 		RetryDurationInSec: args.RetryDurationInSeconds,
+		AckTimeoutInSec:    args.AckTimeoutInSeconds,
 		BlockingAckOnError: args.BlockingAckOnError,
 		WithAcknowledge:    args.WithAcknowledge,
+		PayloadVersion:     args.PayloadVersion,
 	}
 	wsTransceiver, err := transceiver.NewTransceiver(argsTransceiver)
 	if err != nil {

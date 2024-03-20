@@ -19,24 +19,28 @@ import (
 // ArgsWebSocketServer holds all the components needed to create a server
 type ArgsWebSocketServer struct {
 	RetryDurationInSeconds     int
+	AckTimeoutInSeconds        int
 	BlockingAckOnError         bool
 	WithAcknowledge            bool
 	DropMessagesIfNoConnection bool
 	URL                        string
 	PayloadConverter           webSocket.PayloadConverter
 	Log                        core.Logger
+	PayloadVersion             uint32
 }
 
 type server struct {
 	blockingAckOnError         bool
 	withAcknowledge            bool
 	dropMessagesIfNoConnection bool
+	ackTimeoutInSec            int
 	payloadConverter           webSocket.PayloadConverter
 	retryDuration              time.Duration
 	log                        core.Logger
 	httpServer                 webSocket.HttpServerHandler
 	transceiversAndConn        transceiversAndConnHandler
 	payloadHandler             webSocket.PayloadHandler
+	payloadVersion             uint32
 }
 
 // NewWebSocketServer will create a new instance of server
@@ -54,6 +58,8 @@ func NewWebSocketServer(args ArgsWebSocketServer) (*server, error) {
 		payloadHandler:             webSocket.NewNilPayloadHandler(),
 		withAcknowledge:            args.WithAcknowledge,
 		dropMessagesIfNoConnection: args.DropMessagesIfNoConnection,
+		ackTimeoutInSec:            args.AckTimeoutInSeconds,
+		payloadVersion:             args.PayloadVersion,
 	}
 
 	wsServer.initializeServer(args.URL, data.WSRoute)
@@ -82,8 +88,10 @@ func (s *server) connectionHandler(connection webSocket.WSConClient) {
 		PayloadConverter:   s.payloadConverter,
 		Log:                s.log,
 		RetryDurationInSec: int(s.retryDuration.Seconds()),
+		AckTimeoutInSec:    s.ackTimeoutInSec,
 		BlockingAckOnError: s.blockingAckOnError,
 		WithAcknowledge:    s.withAcknowledge,
+		PayloadVersion:     s.payloadVersion,
 	})
 	if err != nil {
 		s.log.Warn("s.connectionHandler cannot create transceiver", "error", err)

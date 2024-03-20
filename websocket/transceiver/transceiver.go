@@ -18,8 +18,10 @@ type ArgsTransceiver struct {
 	PayloadConverter   webSocket.PayloadConverter
 	Log                core.Logger
 	RetryDurationInSec int
+	AckTimeoutInSec    int
 	BlockingAckOnError bool
 	WithAcknowledge    bool
+	PayloadVersion     uint32
 }
 
 type wsTransceiver struct {
@@ -29,11 +31,13 @@ type wsTransceiver struct {
 	log                core.Logger
 	safeCloser         core.SafeCloser
 	retryDuration      time.Duration
+	ackTimeout         time.Duration
 	mapAck             map[uint64]chan struct{}
 	mutMapAck          sync.Mutex
 	counter            uint64
 	blockingAckOnError bool
 	withAcknowledge    bool
+	payloadVersion     uint32
 }
 
 // NewTransceiver will create a new instance of transceiver
@@ -46,11 +50,13 @@ func NewTransceiver(args ArgsTransceiver) (*wsTransceiver, error) {
 	return &wsTransceiver{
 		log:                args.Log,
 		retryDuration:      time.Duration(args.RetryDurationInSec) * time.Second,
+		ackTimeout:         time.Duration(args.AckTimeoutInSec) * time.Second,
 		blockingAckOnError: args.BlockingAckOnError,
 		safeCloser:         closing.NewSafeChanCloser(),
 		payloadHandler:     webSocket.NewNilPayloadHandler(),
 		payloadParser:      args.PayloadConverter,
 		withAcknowledge:    args.WithAcknowledge,
+		payloadVersion:     args.PayloadVersion,
 		mapAck:             make(map[uint64]chan struct{}),
 	}, nil
 }
@@ -64,6 +70,9 @@ func checkArgs(args ArgsTransceiver) error {
 	}
 	if args.RetryDurationInSec == 0 {
 		return data.ErrZeroValueRetryDuration
+	}
+	if args.WithAcknowledge && args.AckTimeoutInSec == 0 {
+		return data.ErrZeroValueAckTimeout
 	}
 	return nil
 }
@@ -134,7 +143,7 @@ func (wt *wsTransceiver) verifyPayloadAndSendAckIfNeeded(connection webSocket.WS
 		return
 	}
 
-	err = wt.payloadHandler.ProcessPayload(wsMessage.Payload, wsMessage.Topic)
+	err = wt.payloadHandler.ProcessPayload(wsMessage.Payload, wsMessage.Topic, wsMessage.Version)
 	if err != nil && wt.blockingAckOnError {
 		wt.log.Warn("wt.payloadHandler.ProcessPayload: cannot handle payload", "error", err)
 		return
@@ -206,6 +215,7 @@ func (wt *wsTransceiver) Send(payload []byte, topic string, connection webSocket
 		Type:            data.PayloadMessage,
 		Payload:         payload,
 		Topic:           topic,
+		Version:         wt.payloadVersion,
 	}
 	newPayload, err := wt.payloadParser.ConstructPayload(wsMessage)
 	if err != nil {
@@ -243,9 +253,14 @@ func (wt *wsTransceiver) sendPayload(payload []byte, connection webSocket.WSConC
 }
 
 func (wt *wsTransceiver) waitForAck(ch chan struct{}) error {
+	timer := time.NewTimer(wt.ackTimeout)
+	defer timer.Stop()
+
 	select {
 	case <-ch:
 		return nil
+	case <-timer.C:
+		return data.ErrAckTimeout
 	case <-wt.safeCloser.ChanClose():
 		return data.ErrExpectedAckWasNotReceivedOnClose
 	}
